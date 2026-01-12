@@ -1,9 +1,9 @@
-//! Aggregation model: combine name DAG + name->operators mapping + log rows.
+//! Aggregation model: combine UI tree (from ops.json) + log rows.
 
 use crate::log::{LogIndex, LogRow};
-use crate::spec::{Addr, NameDag};
+use crate::spec::{Addr, NodeSpec};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OperatorView {
@@ -20,6 +20,9 @@ pub struct NameNodeView {
 
     /// Primary tree children (spanning tree derived from DAG).
     pub children: Vec<String>,
+
+    /// All DAG children (may include multi-parent edges).
+    pub dag_children: Vec<String>,
 
     /// Additional parents beyond the chosen primary parent (for DAG info).
     pub extra_parents: Vec<String>,
@@ -52,16 +55,16 @@ pub struct TotalsView {
 /// - detect operator addr assigned to multiple names (error)
 /// - warn (stderr) about mapped addrs missing from log
 pub fn build_report_data(
-    dag: &NameDag,
-    name_ops: &BTreeMap<String, BTreeSet<Addr>>,
+    nodes_spec: &BTreeMap<String, NodeSpec>,
+    roots: &[String],
     log: &LogIndex,
 ) -> anyhow::Result<ReportData> {
     use anyhow::bail;
 
     // 1) Enforce: each operator addr belongs to at most one name (strict).
     let mut owner: BTreeMap<&Addr, &str> = BTreeMap::new();
-    for (name, ops) in name_ops {
-        for addr in ops {
+    for (name, spec) in nodes_spec {
+        for addr in &spec.operators {
             if let Some(prev) = owner.insert(addr, name.as_str()) {
                 bail!(
                     "operator addr {:?} is assigned to multiple names: {} and {}",
@@ -78,8 +81,17 @@ pub fn build_report_data(
     let mut primary_parent: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut extra_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for name in dag.nodes.keys() {
-        let mut ps = dag.parents.get(name).cloned().unwrap_or_default();
+    // Derive parents from children.
+    let mut parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, spec) in nodes_spec {
+        for child in &spec.children {
+            let cid = child.to_string();
+            parents.entry(cid).or_default().push(name.clone());
+        }
+    }
+
+    for name in nodes_spec.keys() {
+        let mut ps = parents.get(name).cloned().unwrap_or_default();
         ps.sort();
         if ps.is_empty() {
             primary_parent.insert(name.clone(), None);
@@ -105,9 +117,8 @@ pub fn build_report_data(
         kids.sort();
     }
 
-    // Roots for the tree view: use dag.roots, plus any node that has no primary parent.
-    // (dag.roots should usually cover it; this is a safe fallback.)
-    let mut roots = dag.roots.clone();
+    // Roots for the tree view: use provided roots, plus any node that has no primary parent.
+    let mut roots = roots.to_vec();
     for (n, pp) in &primary_parent {
         if pp.is_none() && !roots.contains(n) {
             roots.push(n.clone());
@@ -123,8 +134,8 @@ pub fn build_report_data(
     let mut total_mapped_activations = 0u64;
     let mut operators_mapped = 0usize;
 
-    for (name, node) in &dag.nodes {
-        let ops = name_ops.get(name).cloned().unwrap_or_default();
+    for (name, spec) in nodes_spec {
+        let ops = spec.operators.clone();
 
         let mut operators: Vec<OperatorView> = Vec::new();
         let mut self_ms = 0.0f64;
@@ -172,8 +183,9 @@ pub fn build_report_data(
             name.clone(),
             NameNodeView {
                 name: name.clone(),
-                label: node.label.clone(),
+                label: spec.label.clone(),
                 children: tree_children.get(name).cloned().unwrap_or_default(),
+                dag_children: spec.children.iter().map(|c| c.to_string()).collect(),
                 extra_parents: extra_parents.get(name).cloned().unwrap_or_default(),
                 self_activations: self_act,
                 self_total_active_ms: self_ms,
@@ -185,7 +197,7 @@ pub fn build_report_data(
     Ok(ReportData {
         roots,
         totals: TotalsView {
-            names: dag.nodes.len(),
+            names: nodes_spec.len(),
             operators_in_log: log.len(),
             operators_mapped,
             total_mapped_ms,

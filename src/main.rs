@@ -21,9 +21,6 @@ enum Commands {
         log: String,
 
         #[arg(long)]
-        dag: String,
-
-        #[arg(long)]
         ops: String,
 
         #[arg(short = 'o', long)]
@@ -35,19 +32,23 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
-        Commands::Report { log, dag, ops, out } => {
-            // 1) Parse + validate specs.
-            let dag_spec: spec::DagSpec = serde_json::from_str(&std::fs::read_to_string(&dag)?)?;
+        Commands::Report { log, ops, out } => {
+            // 1) Parse + validate ops.json (contains both topology + operator mapping).
             let ops_spec: spec::OpsSpec = serde_json::from_str(&std::fs::read_to_string(&ops)?)?;
+            let validated = ops_spec.validate_and_build()?;
 
-            let dag = dag_spec.validate_and_build()?;
-            let name_ops = ops_spec.validate_and_build(&dag)?;
+            // Prepare node map keyed by stringified id for downstream rendering.
+            let mut nodes_by_name = std::collections::BTreeMap::new();
+            for (id, node) in validated.nodes {
+                nodes_by_name.insert(id.to_string(), node);
+            }
+            let roots: Vec<String> = validated.roots.iter().map(|id| id.to_string()).collect();
 
             // 2) Parse log.
             let log_index = log::parse_log_file(&log)?;
 
             // 3) Aggregate.
-            let data = model::build_report_data(&dag, &name_ops, &log_index)?;
+            let data = model::build_report_data(&nodes_by_name, &roots, &log_index)?;
 
             // 4) Render HTML.
             let html = render::render_html_report(&data)?;
