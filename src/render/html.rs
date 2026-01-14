@@ -12,7 +12,7 @@ pub fn render_html_report(data: &ReportData) -> anyhow::Result<String> {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FlowLog Profiler</title>
+<title>FlowLog Profile Viz</title>
 <style>
   body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
   header { padding: 12px 16px; border-bottom: 1px solid #ddd; }

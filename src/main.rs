@@ -6,8 +6,8 @@ mod spec;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "flowlog-profiler")]
-#[command(about = "FlowLog profiler report generator", long_about = None)]
+#[command(name = "flowlog-profile-viz")]
+#[command(about = "FlowLog profile viz", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     cmd: Commands,
