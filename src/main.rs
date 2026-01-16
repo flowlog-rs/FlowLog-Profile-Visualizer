@@ -1,13 +1,15 @@
+use clap::{Parser, Subcommand};
+
 mod log;
 mod model;
 mod render;
 mod spec;
 
-use clap::{Parser, Subcommand};
+pub type Result<T> = anyhow::Result<T>;
 
 #[derive(Parser)]
 #[command(name = "flowlog-profile-viz")]
-#[command(about = "FlowLog profile viz", long_about = None)]
+#[command(about = "FlowLog profile visualizer", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     cmd: Commands,
@@ -28,7 +30,7 @@ enum Commands {
     },
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.cmd {
@@ -53,7 +55,7 @@ fn main() -> anyhow::Result<()> {
             // 4) Render HTML.
             let html = render::render_html_report(&data)?;
             std::fs::write(&out, html)?;
-            eprintln!("Wrote {}", out);
+            println!("Wrote {}", out);
         }
     }
 

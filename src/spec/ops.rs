@@ -20,6 +20,8 @@
 //! compute roots (nodes with no incoming edges).
 
 use crate::spec::Addr;
+use crate::Result;
+use anyhow::bail;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -47,7 +49,7 @@ pub struct RawNode {
     pub rule: Option<String>,
 
     #[serde(default)]
-    pub operators: Vec<OperatorRefSpec>,
+    pub operators: Vec<Addr>,
 
     #[serde(default)]
     pub children: Vec<u32>,
@@ -65,21 +67,9 @@ pub struct NodeSpec {
     pub operators: BTreeSet<Addr>,
 }
 
-/// Operator references in ops.json.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum OperatorRefSpec {
-    // New shape: operators: [[0,1,2]]
-    Addr(Vec<u32>),
-    // Backward compatibility: { "addr": [...] }
-    Explicit { addr: Vec<u32> },
-}
-
 impl OpsSpec {
     /// Flatten all nodes, ensure unique ids, and compute roots.
-    pub fn validate_and_build(&self) -> anyhow::Result<ValidatedOps> {
-        use anyhow::bail;
-
+    pub fn validate_and_build(&self) -> Result<ValidatedOps> {
         let raw_nodes = self.nodes.clone();
 
         // Build map keyed by id, check duplicates.
@@ -95,12 +85,8 @@ impl OpsSpec {
                 .unwrap_or_else(|| "other".to_string());
 
             let mut ops = BTreeSet::new();
-            for op in raw.operators {
-                match op {
-                    OperatorRefSpec::Addr(addr) | OperatorRefSpec::Explicit { addr } => {
-                        ops.insert(Addr::new(addr));
-                    }
-                }
+            for addr in raw.operators {
+                ops.insert(addr);
             }
 
             nodes.insert(

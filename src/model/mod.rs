@@ -2,6 +2,8 @@
 
 use crate::log::{LogIndex, LogRow};
 use crate::spec::{Addr, NodeSpec};
+use crate::Result;
+use anyhow::bail;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -61,9 +63,7 @@ pub fn build_report_data(
     nodes_spec: &BTreeMap<String, NodeSpec>,
     roots: &[String],
     log: &LogIndex,
-) -> anyhow::Result<ReportData> {
-    use anyhow::bail;
-
+) -> Result<ReportData> {
     // 1) Enforce: each operator addr belongs to at most one name (strict).
     let mut owner: BTreeMap<&Addr, &str> = BTreeMap::new();
     for (name, spec) in nodes_spec {

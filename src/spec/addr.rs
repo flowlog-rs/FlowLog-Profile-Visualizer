@@ -4,7 +4,9 @@
 //!
 //! We store it as a Vec<u32> and derive ordering so it can be used in BTreeSet/Map.
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+use serde::Deserialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 pub struct Addr(pub Vec<u32>);
 
 impl Addr {

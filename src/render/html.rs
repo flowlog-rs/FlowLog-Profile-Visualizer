@@ -1,11 +1,13 @@
 use crate::model::ReportData;
+use crate::Result;
+use serde_json::to_string;
 
 /// Render a self-contained HTML report (data embedded as JSON).
 ///
 /// Important: we avoid `format!()` because the HTML contains many `{}` from JS
 /// template literals (e.g., `${x}`), which would conflict with Rust formatting.
-pub fn render_html_report(data: &ReportData) -> anyhow::Result<String> {
-    let json = serde_json::to_string(data)?; // embedded as JS object literal
+pub fn render_html_report(data: &ReportData) -> Result<String> {
+    let json = to_string(data)?; // embedded as JS object literal
 
     const TEMPLATE: &str = r##"<!doctype html>
 <html>

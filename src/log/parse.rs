@@ -1,5 +1,6 @@
 use crate::log::row::{LogIndex, LogRow};
 use crate::spec::Addr;
+use crate::Result;
 use anyhow::{Context, bail};
 use regex::Regex;
 use std::fs;
@@ -11,7 +12,7 @@ use std::fs;
 ///
 /// Example:
 /// [0, 8, 10]   33   853.886   ThresholdTotal
-pub fn parse_log_file(path: &str) -> anyhow::Result<LogIndex> {
+pub fn parse_log_file(path: &str) -> Result<LogIndex> {
     let text = fs::read_to_string(path).with_context(|| format!("read log file {}", path))?;
 
     // We allow variable spacing; name may contain spaces and ':'.
@@ -78,7 +79,7 @@ pub fn parse_log_file(path: &str) -> anyhow::Result<LogIndex> {
 }
 
 /// Parse "[0, 8, 10]" into Addr(vec![0,8,10]).
-fn parse_addr(s: &str) -> anyhow::Result<Addr> {
+fn parse_addr(s: &str) -> Result<Addr> {
     let s = s.trim();
     if !s.starts_with('[') || !s.ends_with(']') {
         bail!("addr must be bracketed: {}", s);
