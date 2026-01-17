@@ -91,6 +91,7 @@ pub fn render_html_report(data: &ReportData) -> Result<String> {
     <div id="detailPane">
       <h2 id="title">Select a node</h2>
       <div id="meta" class="muted"></div>
+      <div id="rulePicker" style="margin:6px 0; font-size:13px;"></div>
 
       <table id="opsTable" style="display:none;">
         <thead>
@@ -119,6 +120,7 @@ const DATA = __DATA__;
 const state = {
   expanded: new Set(),
   selected: null,
+  selectedRule: null,
   search: "",
   view: "tree",
   graph: { tx: 0, ty: 0, scale: 1 }, // pan/zoom
@@ -212,6 +214,20 @@ function nodeMatches(name, node) {
     name.toLowerCase().includes(s) ||
     (node.label || "").toLowerCase().includes(s)
   );
+}
+
+function rulesForFingerprint(fp) {
+  if (!fp) return [];
+  const out = [];
+  for (const r of DATA.rules || []) {
+    if (r.nodes && r.nodes[fp]) out.push(r.text);
+  }
+  return out;
+}
+
+function findRuleByText(text) {
+  if (!text) return null;
+  return (DATA.rules || []).find((r) => r.text === text) || null;
 }
 
 function renderTree() {
@@ -341,6 +357,8 @@ function renderTree() {
     const row = document.createElement("div");
     row.className = "tree-node" + (state.selected === name ? " selected" : "");
     row.dataset.name = name || fp;
+    row.dataset.rule = rule.text;
+    row.dataset.fp = fp;
 
     const indent = '<span class="indent"></span>'.repeat(depth);
     const toggle = hasChildren
@@ -364,7 +382,7 @@ function renderTree() {
         renderTree();
         return;
       }
-      if (name) selectNode(name);
+      if (name) selectNode(name, rule.text);
     };
 
     root.appendChild(row);
@@ -919,27 +937,87 @@ function renderGraph() {
 }
 
 // Ensure a selected node is visible in the left list and scroll to it.
-function ensureTreeVisible(name) {
-  // Parent map (best-effort): your left list is grouped by block/rule,
-  // so we just scroll to the row if present; no tree expansion needed.
-  const row = document.querySelector(`#tree .tree-node[data-name="${CSS.escape(name)}"]`);
+function ensureTreeVisible(name, ruleText = null, fp = null) {
+  let row = null;
+  if (fp && ruleText) {
+    row = document.querySelector(
+      `#tree .tree-node[data-fp="${CSS.escape(fp)}"][data-rule="${CSS.escape(ruleText)}"]`
+    );
+  }
+  if (!row) {
+    row = document.querySelector(`#tree .tree-node[data-name="${CSS.escape(name)}"]`);
+  }
   row?.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
-function selectNode(name) {
+function renderRulePicker(name, fp, matches, selectedRule) {
+  const el = document.getElementById("rulePicker");
+  if (!fp || !matches.length) {
+    el.innerHTML = "";
+    return;
+  }
+  if (matches.length === 1) {
+    el.innerHTML = `rule: ${escapeHtml(matches[0])}`;
+    return;
+  }
+
+  const buttons = matches
+    .map((r) => {
+      const active = r === selectedRule;
+      return `<button data-rule="${escapeHtml(r)}" style="margin-right:6px; padding:4px 8px;${
+        active ? " font-weight:600;" : ""
+      }">${escapeHtml(r)}</button>`;
+    })
+    .join("");
+
+  el.innerHTML = `Shared in ${matches.length} rules: ${buttons}`;
+  el.querySelectorAll("button[data-rule]").forEach((btn) => {
+    btn.onclick = () => selectNode(name, btn.dataset.rule);
+  });
+}
+
+function selectNode(name, preferredRule = null) {
   state.selected = name;
 
   const node = DATA.nodes[name];
   document.getElementById("title").textContent = node.label;
 
+  const fp = node.fingerprint || null;
+  const matches = fp ? rulesForFingerprint(fp) : [];
+
+  let chosenRule = null;
+  if (preferredRule && matches.includes(preferredRule)) {
+    chosenRule = preferredRule;
+  } else if (state.selectedRule && matches.includes(state.selectedRule)) {
+    chosenRule = state.selectedRule;
+  } else {
+    chosenRule = matches[0] || null;
+  }
+  state.selectedRule = chosenRule;
+
+  // Ensure the corresponding plan tree is expanded so the node is visible.
+  if (chosenRule && fp) {
+    const ruleObj = findRuleByText(chosenRule);
+    if (ruleObj && ruleObj.nodes) {
+      for (const [rfp, pn] of Object.entries(ruleObj.nodes)) {
+        const hasEdges = (pn.children && pn.children.length) || (pn.parents && pn.parents.length);
+        if (hasEdges) state.expanded.add(planKey(chosenRule, rfp));
+      }
+    }
+  }
+
   const extra =
     node.extra_parents && node.extra_parents.length
       ? ` extra parents: ${node.extra_parents.join(", ")}`
       : "";
+  const sharedLabel = matches.length > 1 ? ` | shared in ${matches.length} rules` : "";
 
   document.getElementById("meta").textContent =
     `id: ${name} | time: ${fmtMs(node.self_total_active_ms)} ms | activations: ${node.self_activations}` +
+    sharedLabel +
     extra;
+
+  renderRulePicker(name, fp, matches, chosenRule);
 
   const tbl = document.getElementById("opsTable");
   const body = document.getElementById("opsBody");
@@ -962,7 +1040,7 @@ function selectNode(name) {
   }
 
   renderTree();
-  ensureTreeVisible(name);
+  ensureTreeVisible(name, chosenRule, fp);
   renderGraph();
 }
 
