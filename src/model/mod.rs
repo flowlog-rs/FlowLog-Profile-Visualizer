@@ -26,8 +26,8 @@ pub struct NameNodeView {
     /// Primary tree children (spanning tree derived from DAG).
     pub children: Vec<String>,
 
-    /// All DAG children (may include multi-parent edges).
-    pub dag_children: Vec<String>,
+    /// All DAG parents (may include multi-parent edges).
+    pub dag_parents: Vec<String>,
 
     /// Additional parents beyond the chosen primary parent (for DAG info).
     pub extra_parents: Vec<String>,
@@ -104,18 +104,11 @@ pub fn build_report_data(
     let mut primary_parent: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut extra_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    // Derive parents from children.
-    let mut parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (name, spec) in nodes_spec {
-        for child in &spec.children {
-            let cid = child.to_string();
-            parents.entry(cid).or_default().push(name.clone());
-        }
-    }
-
-    for name in nodes_spec.keys() {
-        let mut ps = parents.get(name).cloned().unwrap_or_default();
+        let mut ps: Vec<String> = spec.parents.iter().map(|p| p.to_string()).collect();
         ps.sort();
+        ps.dedup();
+
         if ps.is_empty() {
             primary_parent.insert(name.clone(), None);
             extra_parents.insert(name.clone(), vec![]);
@@ -138,6 +131,15 @@ pub fn build_report_data(
     }
     for kids in tree_children.values_mut() {
         kids.sort();
+    }
+
+    // Build DAG parents list for direct consumption in the renderer.
+    let mut dag_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, spec) in nodes_spec {
+        let mut ps: Vec<String> = spec.parents.iter().map(|p| p.to_string()).collect();
+        ps.sort();
+        ps.dedup();
+        dag_parents.insert(name.clone(), ps);
     }
 
     // Roots for the tree view: use provided roots, plus any node that has no primary parent.
@@ -206,7 +208,7 @@ pub fn build_report_data(
                 fingerprint: spec.fingerprint.clone(),
                 tags: spec.tags.clone(),
                 children: tree_children.get(name).cloned().unwrap_or_default(),
-                dag_children: spec.children.iter().map(|c| c.to_string()).collect(),
+                dag_parents: dag_parents.get(name).cloned().unwrap_or_default(),
                 extra_parents: extra_parents.get(name).cloned().unwrap_or_default(),
                 self_activations: self_act,
                 self_total_active_ms: self_ms,

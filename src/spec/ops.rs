@@ -9,14 +9,14 @@
 //!       "block": "input",        // grouping bucket for graph blocks
 //!       "tags": ["Input"],        // optional, auxiliary
 //!       "operators": [[0,1,2]],    // list of Timely operator addresses
-//!       "children": [1, 2]         // edges in the DAG
+//!       "parents": [1, 2]          // edges in the DAG (incoming)
 //!     },
 //!     ...
 //!   ]
 //! }
 //!
-//! We validate ids, turn operator address arrays into Addr, derive parents, and
-//! compute roots (nodes with no incoming edges).
+//! We validate ids, turn operator address arrays into Addr, and compute roots
+//! (nodes with no incoming edges).
 
 use crate::Result;
 use crate::spec::Addr;
@@ -55,7 +55,7 @@ pub struct RawNode {
     pub operators: Vec<Addr>,
 
     #[serde(default)]
-    pub children: Vec<u32>,
+    pub parents: Vec<u32>,
 }
 
 /// Rule-level plan tree description keyed by fingerprints.
@@ -85,7 +85,7 @@ pub struct NodeSpec {
     pub block: String,
     pub fingerprint: Option<String>,
     pub tags: Vec<String>,
-    pub children: Vec<u32>,
+    pub parents: Vec<u32>,
     pub operators: BTreeSet<Addr>,
 }
 
@@ -126,6 +126,10 @@ impl OpsSpec {
                 ops.insert(addr);
             }
 
+            let mut parents = raw.parents;
+            parents.sort();
+            parents.dedup();
+
             nodes.insert(
                 raw.id,
                 NodeSpec {
@@ -134,7 +138,7 @@ impl OpsSpec {
                     block,
                     fingerprint,
                     tags: raw.tags,
-                    children: raw.children,
+                    parents,
                     operators: ops,
                 },
             );
@@ -163,28 +167,21 @@ impl OpsSpec {
             }
         }
 
-        // Compute parents map and roots from children edges.
-        let mut parents: HashMap<u32, Vec<u32>> = HashMap::new();
-        for (pid, node) in &nodes {
-            for &cid in &node.children {
-                parents.entry(cid).or_default().push(*pid);
-            }
-        }
-
+        // Roots are nodes with no parents.
         let mut roots: Vec<u32> = Vec::new();
-        for id in nodes.keys() {
-            if !parents.contains_key(id) {
+        for (id, node) in &nodes {
+            if node.parents.is_empty() {
                 roots.push(*id);
             }
         }
         roots.sort();
         roots.dedup();
 
-        // Basic sanity: every child id must exist.
+        // Basic sanity: every parent id must exist.
         for node in nodes.values() {
-            for cid in &node.children {
-                if !nodes.contains_key(cid) {
-                    bail!("node {} references missing child id {}", node.id, cid);
+            for pid in &node.parents {
+                if !nodes.contains_key(pid) {
+                    bail!("node {} references missing parent id {}", node.id, pid);
                 }
             }
         }

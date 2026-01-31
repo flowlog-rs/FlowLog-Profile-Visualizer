@@ -498,9 +498,7 @@ function renderGraph() {
     return h / 2;
   }
 
-  // Prefer explicit DAG edges if present, else fall back to tree children.
-  const childrenOf = (name) =>
-    nodes[name]?.dag_children || nodes[name]?.children || [];
+  const hasDagParents = allNames.some((n) => nodes[n]?.dag_parents !== undefined);
 
   // --- Build DAG edges (parent -> child) ---
   const parents = new Map(); // child -> [parents...]
@@ -513,11 +511,16 @@ function renderGraph() {
     indeg.set(n, 0);
   }
 
-  for (const u of allNames) {
-    for (const v of childrenOf(u)) {
-      if (!nodes[v]) continue;
-      parents.get(v).push(u);
-      children.get(u).push(v);
+  if (!hasDagParents) {
+    throw new Error("Missing dag_parents in report data");
+  }
+
+  for (const v of allNames) {
+    const ps = nodes[v]?.dag_parents || [];
+    for (const p of ps) {
+      if (!nodes[p]) continue;
+      parents.get(v).push(p);
+      children.get(p).push(v);
       indeg.set(v, (indeg.get(v) ?? 0) + 1);
     }
   }
@@ -765,8 +768,8 @@ function renderGraph() {
   for (const [name, node] of Object.entries(nodes)) {
     const from = boxByName.get(name);
     if (!from) continue;
-    const dagKids = node.dag_children || node.children || [];
-    for (const c of dagKids) {
+    const kids = children.get(name) || [];
+    for (const c of kids) {
       const to = boxByName.get(c);
       if (!to) continue;
       edges += `<path class="g-edge" d="${edgePath(from, to)}" />`;
