@@ -1,11 +1,15 @@
 //! Aggregation model: combine UI tree (from ops.json) + log rows.
 
-use crate::Result;
+use crate::addr::Addr;
+use crate::diagnostics;
 use crate::log::{LogIndex, LogRow};
-use crate::spec::{Addr, NodeSpec, RuleSpec};
+use crate::ops::{NodeSpec, RuleSpec};
+use crate::Result;
+
 use anyhow::bail;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OperatorView {
@@ -84,40 +88,46 @@ pub fn build_report_data(
     fingerprint_to_node: &BTreeMap<String, String>,
     log: &LogIndex,
 ) -> Result<ReportData> {
-    // 1) Enforce: each operator addr belongs to at most one name (strict).
+    // Phase 1: enforce each operator addr belongs to at most one name (strict).
     let mut owner: BTreeMap<&Addr, &str> = BTreeMap::new();
     for (name, spec) in nodes_spec {
         for addr in &spec.operators {
             if let Some(prev) = owner.insert(addr, name.as_str()) {
                 bail!(
-                    "operator addr {:?} is assigned to multiple names: {} and {}",
-                    addr.0,
-                    prev,
-                    name
+                    "{}",
+                    diagnostics::error_message(format!(
+                        "operator addr {:?} is assigned to multiple names: {} and {}",
+                        addr.0,
+                        prev,
+                        name
+                    ))
                 );
             }
         }
     }
 
-    // 2) Build a stable spanning tree from the DAG.
-    // Choose a primary parent for each node: lexicographically smallest parent.
+    // Phase 2: normalize parent lists once and derive tree/DAG metadata.
+    // We choose a primary parent for each node: lexicographically smallest parent.
+    let mut normalized_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, spec) in nodes_spec {
+        let parents = normalize_parents(spec.parents.iter().map(|p| p.to_string()).collect());
+        normalized_parents.insert(name.clone(), parents);
+    }
+
     let mut primary_parent: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut extra_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for (name, spec) in nodes_spec {
-        let mut ps: Vec<String> = spec.parents.iter().map(|p| p.to_string()).collect();
-        ps.sort();
-        ps.dedup();
-
-        if ps.is_empty() {
+    for (name, parents) in &normalized_parents {
+        if parents.is_empty() {
             primary_parent.insert(name.clone(), None);
             extra_parents.insert(name.clone(), vec![]);
-        } else {
-            let primary = ps[0].clone();
-            let extras = ps[1..].to_vec();
-            primary_parent.insert(name.clone(), Some(primary));
-            extra_parents.insert(name.clone(), extras);
+            continue;
         }
+
+        let primary = parents[0].clone();
+        let extras = parents[1..].to_vec();
+        primary_parent.insert(name.clone(), Some(primary));
+        extra_parents.insert(name.clone(), extras);
     }
 
     let mut tree_children: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -134,25 +144,18 @@ pub fn build_report_data(
     }
 
     // Build DAG parents list for direct consumption in the renderer.
-    let mut dag_parents: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (name, spec) in nodes_spec {
-        let mut ps: Vec<String> = spec.parents.iter().map(|p| p.to_string()).collect();
-        ps.sort();
-        ps.dedup();
-        dag_parents.insert(name.clone(), ps);
-    }
+    let dag_parents: BTreeMap<String, Vec<String>> = normalized_parents.clone();
 
     // Roots for the tree view: use provided roots, plus any node that has no primary parent.
-    let mut roots = roots.to_vec();
-    for (n, pp) in &primary_parent {
-        if pp.is_none() && !roots.contains(n) {
-            roots.push(n.clone());
+    let mut roots_set: BTreeSet<String> = roots.iter().cloned().collect();
+    for (name, pp) in &primary_parent {
+        if pp.is_none() {
+            roots_set.insert(name.clone());
         }
     }
-    roots.sort();
-    roots.dedup();
+    let roots: Vec<String> = roots_set.into_iter().collect();
 
-    // 3) Build per-name operator lists + aggregates.
+    // Phase 3: build per-name operator lists + aggregates.
     let mut nodes_view: BTreeMap<String, NameNodeView> = BTreeMap::new();
 
     let mut total_mapped_ms = 0.0f64;
@@ -160,13 +163,11 @@ pub fn build_report_data(
     let mut operators_mapped = 0usize;
 
     for (name, spec) in nodes_spec {
-        let ops = spec.operators.clone();
-
         let mut operators: Vec<OperatorView> = Vec::new();
         let mut self_ms = 0.0f64;
         let mut self_act = 0u64;
 
-        for addr in &ops {
+        for addr in &spec.operators {
             match log.get(addr) {
                 Some(LogRow {
                     addr,
@@ -187,12 +188,10 @@ pub fn build_report_data(
                     total_mapped_activations += *activations;
                     operators_mapped += 1;
                 }
-                None => {
-                    eprintln!(
-                        "WARN: ops.json maps name '{}' to addr {:?}, but addr not found in log",
-                        name, addr.0
-                    );
-                }
+                None => diagnostics::warn(format!(
+                    "ops.json maps name '{}' to addr {:?}, but addr not found in log",
+                    name, addr.0
+                )),
             }
         }
 
@@ -279,4 +278,10 @@ fn build_rule_views(
     }
 
     views
+}
+
+fn normalize_parents<T: Ord>(mut parents: Vec<T>) -> Vec<T> {
+    parents.sort();
+    parents.dedup();
+    parents
 }
